@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 
 class HighResQHD:
-    def __init__(self, f, grad, lb, rb, N, success_gap, s, beta):
+    def __init__(self, f, grad, lb, rb, N, success_gap, s, beta, gamma=5):
         self.f=f
         self.grad=grad
         self.lb=lb 
@@ -18,6 +18,7 @@ class HighResQHD:
         self.success_gap=success_gap
         self.s=s
         self.beta=beta 
+        self.gamma=gamma
         
 
         L = rb - lb
@@ -36,6 +37,7 @@ class HighResQHD:
         # self.G2 = self.Gx**2 + self.Gy**2
 
         self.V = f(X,Y)
+        self.fmin = np.min(self.V[:])
         df_dx, df_dy = grad
         self.Gx = df_dx(X,Y)
         self.Gy = df_dy(X,Y)
@@ -56,14 +58,15 @@ class HighResQHD:
         return u0
     
     def success_indicator(self):
-        indicator = self.V < self.success_gap
+        indicator = self.V - self.fmin < self.success_gap
         return indicator
 
 
-    def qhd_simulator(self, T, n_iter, capture_every):
+    def qhd_simulator(self, T, n_iter, capture_every, return_wave_fun=False):
         snapshot_times = []
         obj_val = []
         success_prob = []
+        wave_fun = []
 
         dt = T / n_iter
         psi = self.construct_init_state(self.N)
@@ -82,6 +85,8 @@ class HighResQHD:
                 snapshot_times.append(t_temp)
                 obj_val.append(np.sum(prob * self.V))
                 success_prob.append(np.sum(prob * success_indicator))
+                if return_wave_fun:
+                    wave_fun.append(psi)
             
         # add the last frame if not before
         if i % capture_every != 0:
@@ -90,11 +95,97 @@ class HighResQHD:
             snapshot_times.append(t_temp)
             obj_val.append(np.sum(prob * self.V))
             success_prob.append(np.sum(prob * success_indicator))
+            if return_wave_fun:
+                wave_fun.append(psi)
 
-        return np.array(snapshot_times), np.array(obj_val), np.array(success_prob)
+        if return_wave_fun:
+            return np.array(snapshot_times), np.array(obj_val), np.array(success_prob), wave_fun
+        else:
+            return np.array(snapshot_times), np.array(obj_val), np.array(success_prob)
     
 
-    def high_res_qhd_simulator(self, T, n_iter, capture_every):
+    def high_res_qhd_helper(self, t0, t1, inner_loop_iter, psi):
+        t = (t1 + t0) / 2
+        dt = (t1 - t0) / inner_loop_iter
+
+        s_temp = self.s(t)
+        beta_temp = self.beta(t)
+        a1 = (1 / t**3)
+        a2 = 0.5 * beta_temp
+        a3 = 0 # 0.5 * beta_temp * (beta_temp + sqrt(s_temp)) * t**3
+        a4 = t**3 + self.gamma * t**2
+        #t**3 + 1.5 * (2 * beta_temp + sqrt(s_temp)) * t**2
+
+        for j in range(inner_loop_iter):
+            psi = exp(-1j * dt / 2 * (a3 * self.G2 + a4 * self.V)) * psi 
+            psi = ifft2(exp(1j * dt / 2 * a1 * self.d2_coeff) * fft2(psi))
+            psi -= a2 * dt* (self.Gx * ifft2(self.dx_coeff * fft2(psi)) + ifft2(self.dx_coeff * fft2(self.Gx * psi)))
+            psi -= a2 * dt* (self.Gy * ifft2(self.dy_coeff * fft2(psi)) + ifft2(self.dy_coeff * fft2(self.Gy * psi)))
+            psi = exp(-1j * dt / 2 * (a3 * self.G2 + a4 * self.V)) * psi 
+            psi = ifft2(exp(1j * dt / 2 * a1 * self.d2_coeff) * fft2(psi))
+        
+        return psi
+
+
+
+
+    def high_res_qhd_simulator(self, T, n_iter, capture_every, inner_loop_iter=100, return_wave_fun=False):
+        snapshot_times = []
+        obj_val = []
+        success_prob = []
+        wave_fun = []
+
+        dt = T / n_iter
+        psi = self.construct_init_state(self.N)
+        success_indicator = self.success_indicator()
+
+        for i in range(n_iter):
+            t0 = dt * i
+            t1 = t0 + dt
+            psi = self.high_res_qhd_helper(t0, t1, inner_loop_iter, psi)
+            # s_temp = self.s(t)
+            # beta_temp = self.beta(t)
+
+            # a1 = (1 / t**3)
+            # a2 = 0.5 * beta_temp
+            # a3 = 0.5 * beta_temp * (beta_temp + sqrt(s_temp)) * t**3
+            # a4 = t**3 + 1.5 * (2 * beta_temp + sqrt(s_temp)) * t**2
+            
+            # psi = exp(-1j * dt / 2 * (a3 * self.G2 + a4 * self.V)) * psi 
+            # psi = ifft2(exp(1j * dt / 2 * a1 * self.d2_coeff) * fft2(psi))
+            # psi -= a2 * dt* (self.Gx * ifft2(self.dx_coeff * fft2(psi)) + ifft2(self.dx_coeff * fft2(self.Gx * psi)))
+            # psi -= a2 * dt* (self.Gy * ifft2(self.dy_coeff * fft2(psi)) + ifft2(self.dy_coeff * fft2(self.Gy * psi)))
+            # psi = exp(-1j * dt / 2 * (a3 * self.G2 + a4 * self.V)) * psi 
+            # psi = ifft2(exp(1j * dt / 2 * a1 * self.d2_coeff) * fft2(psi))
+
+            if i % capture_every == 0:
+                prob = np.abs(psi)**2
+                prob /= np.sum(prob)
+                snapshot_times.append(t1)
+                obj_val.append(np.sum(prob * self.V))
+                success_prob.append(np.sum(prob * success_indicator))
+                if return_wave_fun:
+                    wave_fun.append(psi)
+
+
+        # add the last frame if not before
+        if i % capture_every != 0:
+            prob = np.abs(psi)**2
+            prob /= np.sum(prob)
+            snapshot_times.append(t1)
+            obj_val.append(np.sum(prob * self.V))
+            success_prob.append(np.sum(prob * success_indicator))
+            if return_wave_fun:
+                wave_fun.append(psi)
+
+        if return_wave_fun:
+            return np.array(snapshot_times), np.array(obj_val), np.array(success_prob), wave_fun
+        else:
+            return np.array(snapshot_times), np.array(obj_val), np.array(success_prob)
+    
+
+
+    def high_res_qhd_simulator_legacy(self, T, n_iter, capture_every):
         snapshot_times = []
         obj_val = []
         success_prob = []
@@ -180,7 +271,7 @@ class HighResQHD:
             for j in range(n_steps):
                 current_f = self.f(x[0], x[1])
                 obj_val_mat[i,j] = current_f 
-                if current_f < self.success_gap:
+                if current_f - self.fmin < self.success_gap:
                     success_prob_mat[i,j] = 1
 
                 g1 = np.array([df_dx(y[0],y[1]), df_dy(y[0],y[1])])
@@ -207,7 +298,7 @@ class HighResQHD:
             for j in range(n_steps):
                 current_f = self.f(x[0], x[1])
                 obj_val_mat[i,j] = current_f 
-                if current_f < self.success_gap:
+                if current_f - self.fmin < self.success_gap:
                     success_prob_mat[i,j] = 1
 
                 g = np.array([df_dx(x[0],x[1]), df_dy(x[0],x[1])])

@@ -21,6 +21,10 @@ class HighResQHD2D:
         self.dx = (self.rb - self.lb) / self.N 
         self.x_data = np.linspace(self.lb, self.rb-self.dx, self.N)
 
+        X, Y = np.meshgrid(self.x_data, self.x_data, sparse=False)
+        self.X = X 
+        self.Y = Y
+        self.V = f(X,Y)
 
     @staticmethod
     def fdm_discretization(f, grad, lb, rb, N):
@@ -146,6 +150,7 @@ class HighResQHD2D:
 
         H_kinetic = csc_matrix(kron(K, eye(self.N)) + kron(eye(self.N), K))
         H_cross = csc_matrix(G1 @ P1 + P1 @ G1 + G2 @ P2 + P2 @ G2)
+        H_obj = csc_matrix(np.diag(obj))
 
         def Ham(t):
             a1 = (1 / t**3)
@@ -155,7 +160,7 @@ class HighResQHD2D:
 
             # H1 = a1 * H_kinetic
             # H2 = a2 * H_cross
-            H = a1 * H_kinetic + a2 * H_cross
+            H = a1 * H_kinetic + a2 * H_cross + a4 * H_obj
             h = a3 * (g1**2 + g2**2) + a4 * obj
             return H, h
 
@@ -182,7 +187,7 @@ class HighResQHD2D:
             H, h = Ham(snapshot_times[i])
             psi = expm_multiply(-1j*dt*H, psi)
             # psi = expm_multiply(-1j*dt*H2, psi)
-            psi = np.exp(-1j*dt*h) * psi
+            # psi = np.exp(-1j*dt*h) * psi
             probability[i+1] = np.abs(psi)**2
         
         return snapshot_times, probability
