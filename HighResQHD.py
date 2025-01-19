@@ -1,7 +1,7 @@
 import numpy as np 
 from numpy import pi, exp, sin, cos, sqrt
 from numpy.fft import fft2, ifft2
-from numpy.linalg import eigh
+from numpy.linalg import eigh, norm
 from scipy.integrate import odeint, solve_ivp 
 from scipy.sparse import csc_matrix, kron, eye, diags
 from scipy.sparse.linalg import expm_multiply
@@ -62,20 +62,20 @@ class HighResQHD:
         return indicator
 
 
-    def qhd_simulator(self, T, n_iter, capture_every, return_wave_fun=False):
+    def qhd_simulator(self, T, n_iter, capture_every, return_wave_fun=False, T0=0):
         snapshot_times = []
         obj_val = []
         success_prob = []
         wave_fun = []
 
-        dt = T / n_iter
+        dt = (T - T0) / n_iter
         psi = self.construct_init_state(self.N)
         success_indicator = self.success_indicator()
         tdep1 = lambda t: 1 / t**3
         tdep2 = lambda t: t**3
 
         for i in range(n_iter):
-            t_temp = dt * (1+i)
+            t_temp = T0 + dt * (1+i)
             psi = exp(-1j * dt * tdep2(t_temp) * self.V) * psi 
             psi = ifft2(exp(1j*dt*tdep1(t_temp) * self.d2_coeff) * fft2(psi))
 
@@ -129,18 +129,18 @@ class HighResQHD:
 
 
 
-    def high_res_qhd_simulator(self, T, n_iter, capture_every, inner_loop_iter=100, return_wave_fun=False):
+    def high_res_qhd_simulator(self, T, n_iter, capture_every, inner_loop_iter=100, return_wave_fun=False, T0=0):
         snapshot_times = []
         obj_val = []
         success_prob = []
         wave_fun = []
 
-        dt = T / n_iter
+        dt = (T - T0) / n_iter
         psi = self.construct_init_state(self.N)
         success_indicator = self.success_indicator()
 
         for i in range(n_iter):
-            t0 = dt * i
+            t0 = T0 + dt * i
             t1 = t0 + dt
             psi = self.high_res_qhd_helper(t0, t1, inner_loop_iter, psi)
             # s_temp = self.s(t)
@@ -257,12 +257,15 @@ class HighResQHD:
         return snapshot_times, mean_obj_val, success_prob
     
 
-    def nesterov_samples(self, n_samples, n_steps, lr):
+    def nesterov_samples(self, n_samples, n_steps, lr, return_grad_norm=False):
         snapshot_times = np.linspace(0, (n_steps-1) * lr, n_steps)
 
         df_dx, df_dy = self.grad
         obj_val_mat = np.zeros((n_samples, n_steps))
         success_prob_mat = np.zeros((n_samples, n_steps))
+
+        if return_grad_norm:
+            grad_norm_mat = np.zeros((n_samples, n_steps))
         
         for i in range(n_samples):
             x = self.lb + np.random.rand(2) * self.L 
@@ -275,6 +278,9 @@ class HighResQHD:
                     success_prob_mat[i,j] = 1
 
                 g1 = np.array([df_dx(y[0],y[1]), df_dy(y[0],y[1])])
+                if return_grad_norm:
+                    grad_norm_mat[i,j] = norm(g1)**2
+
                 # NAGD
                 x0 = x
                 x = y - lr * g1 
@@ -282,15 +288,23 @@ class HighResQHD:
                 
         mean_obj_val = np.mean(obj_val_mat, axis=0)
         success_prob = np.mean(success_prob_mat, axis=0)
-        return snapshot_times, mean_obj_val, success_prob
+        
+        if return_grad_norm:
+            grad_norm = np.mean(grad_norm_mat, axis=0)
+            return snapshot_times, mean_obj_val, success_prob, grad_norm
+        else:
+            return snapshot_times, mean_obj_val, success_prob
     
 
-    def sgd_samples(self, n_samples, n_steps, lr):
+    def sgd_samples(self, n_samples, n_steps, lr, return_grad_norm=False):
         snapshot_times = np.linspace(0, (n_steps-1) * lr, n_steps)
 
         df_dx, df_dy = self.grad
         obj_val_mat = np.zeros((n_samples, n_steps))
         success_prob_mat = np.zeros((n_samples, n_steps))
+
+        if return_grad_norm:
+            grad_norm_mat = np.zeros((n_samples, n_steps))
         
         for i in range(n_samples):
             x = self.lb + np.random.rand(2) * self.L
@@ -302,14 +316,21 @@ class HighResQHD:
                     success_prob_mat[i,j] = 1
 
                 g = np.array([df_dx(x[0],x[1]), df_dy(x[0],x[1])])
-                v = np.random.rand(2)
+                if return_grad_norm:
+                    grad_norm_mat[i,j] = norm(g)**2
+
                 # SGD
+                v = np.random.rand(2)
                 x -= lr * g + lr / (j+1) * v
                 
         mean_obj_val = np.mean(obj_val_mat, axis=0)
         success_prob = np.mean(success_prob_mat, axis=0)
-        return snapshot_times, mean_obj_val, success_prob
-
+        
+        if return_grad_norm:
+            grad_norm = np.mean(grad_norm_mat, axis=0)
+            return snapshot_times, mean_obj_val, success_prob, grad_norm
+        else:
+            return snapshot_times, mean_obj_val, success_prob
 
     # @staticmethod
     # def fdm_discretization(f, grad, lb, rb, N):
