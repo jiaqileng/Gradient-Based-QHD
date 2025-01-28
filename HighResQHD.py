@@ -331,6 +331,49 @@ class HighResQHD:
             return snapshot_times, mean_obj_val, success_prob, grad_norm
         else:
             return snapshot_times, mean_obj_val, success_prob
+        
+    
+    def sgd_momentum_samples(self, n_samples, n_steps, lr, return_grad_norm=False):
+        snapshot_times = np.linspace(0, (n_steps-1) * lr, n_steps)
+
+        df_dx, df_dy = self.grad
+        obj_val_mat = np.zeros((n_samples, n_steps))
+        success_prob_mat = np.zeros((n_samples, n_steps))
+
+        if return_grad_norm:
+            grad_norm_mat = np.zeros((n_samples, n_steps))
+        
+        
+        increment_eta = 0.4 / n_steps
+        for i in range(n_samples):
+            x = self.lb + np.random.rand(2) * self.L
+            v = np.zeros(2)
+
+            for j in range(n_steps):
+                current_f = self.f(x[0], x[1])
+                obj_val_mat[i,j] = current_f 
+                if current_f - self.fmin < self.success_gap:
+                    success_prob_mat[i,j] = 1
+
+                g = np.array([df_dx(x[0],x[1]), df_dy(x[0],x[1])])
+                if return_grad_norm:
+                    grad_norm_mat[i,j] = norm(g)**2
+
+                # SGD with momentum
+                n = np.random.rand(2)
+                eta = 0.5 + (j+1) * increment_eta
+                v = eta * v - (1 - eta) * lr * (g + 1 / (j+1) * n)
+                x += v
+                
+        mean_obj_val = np.mean(obj_val_mat, axis=0)
+        success_prob = np.mean(success_prob_mat, axis=0)
+        
+        if return_grad_norm:
+            grad_norm = np.mean(grad_norm_mat, axis=0)
+            return snapshot_times, mean_obj_val, success_prob, grad_norm
+        else:
+            return snapshot_times, mean_obj_val, success_prob
+        
 
     # @staticmethod
     # def fdm_discretization(f, grad, lb, rb, N):
