@@ -3,7 +3,7 @@
 [Jiaqi Leng](https://jiaqileng.github.io/), [Bin Shi](https://bin-shi-gif.github.io/)
 
 
-[[arXiv]](https://arxiv.org/abs/xxxx.xxxxx) [[GitHub]](https://github.com/jiaqileng/Gradient-Based-QHD)
+[[arXiv]](https://arxiv.org/abs/2505.14670) [[GitHub]](https://github.com/jiaqileng/Gradient-Based-QHD)
 
 
 ## Demos
